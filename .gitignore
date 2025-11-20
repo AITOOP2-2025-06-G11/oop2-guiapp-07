@@ -210,3 +210,4 @@ __marimo__/
 python-audio-output.wav
 transcriptions/
 whisper-base-mlx/
+history.json
