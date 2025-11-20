@@ -1,6 +1,26 @@
 import sys
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QTextEdit, QMessageBox
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Signal, Qt
+from recordTenSeconds import recordTenSeconds
+from transcribeAudio import transcribeAudio
+from saveTranscription import saveTranscription
+
+class Worker(QThread):
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, func, *args, **kwargs):
+        super().__init__()
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+    def run(self):
+        try:
+            result = self.func(*self.args, **self.kwargs)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
 
 class AudioApp(QWidget):
     def __init__(self):
@@ -8,7 +28,7 @@ class AudioApp(QWidget):
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle('Audio Transcription App (UI Only)')
+        self.setWindowTitle('Audio Transcription App')
         self.setGeometry(100, 100, 600, 400)
 
         layout = QVBoxLayout()
@@ -37,14 +57,52 @@ class AudioApp(QWidget):
         self.setLayout(layout)
 
     def start_recording(self):
-        self.status_label.setText('録音ボタンが押されました')
-        self.result_area.append("--- 録音処理（未実装） ---")
-        # UIの動作確認のため、ボタンの状態を変更
+        self.status_label.setText('録音中... (10秒間)')
+        self.record_btn.setEnabled(False)
+        self.transcribe_btn.setEnabled(False)
+        self.result_area.append("--- 録音を開始します ---")
+        
+        # 録音処理を別スレッドで実行
+        self.record_worker = Worker(recordTenSeconds)
+        self.record_worker.finished.connect(self.on_recording_finished)
+        self.record_worker.error.connect(self.on_error)
+        self.record_worker.start()
+
+    def on_recording_finished(self, result):
+        self.status_label.setText('録音完了')
+        self.record_btn.setEnabled(True)
         self.transcribe_btn.setEnabled(True)
+        self.result_area.append("録音が完了しました。")
 
     def start_transcription(self):
-        self.status_label.setText('文字起こしボタンが押されました')
-        self.result_area.append("--- 文字起こし処理（未実装） ---")
+        self.status_label.setText('文字起こし中...')
+        self.record_btn.setEnabled(False)
+        self.transcribe_btn.setEnabled(False)
+        self.result_area.append("--- 文字起こしを開始します ---")
+
+        # 文字起こし処理を別スレッドで実行
+        self.transcribe_worker = Worker(transcribeAudio)
+        self.transcribe_worker.finished.connect(self.on_transcription_finished)
+        self.transcribe_worker.error.connect(self.on_error)
+        self.transcribe_worker.start()
+
+    def on_transcription_finished(self, text):
+        self.status_label.setText('文字起こし完了')
+        self.record_btn.setEnabled(True)
+        self.transcribe_btn.setEnabled(True)
+        self.result_area.append(f"結果:\n{text}")
+        
+        try:
+            save_path = saveTranscription(text)
+            self.result_area.append(f"\n保存先: {save_path}")
+        except Exception as e:
+            self.result_area.append(f"\n保存エラー: {e}")
+
+    def on_error(self, error_msg):
+        self.status_label.setText('エラー発生')
+        self.record_btn.setEnabled(True)
+        self.transcribe_btn.setEnabled(True)
+        QMessageBox.critical(self, "エラー", f"処理中にエラーが発生しました:\n{error_msg}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
